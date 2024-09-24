@@ -99,10 +99,10 @@ main:
               - start_existing_workflow:
                   call: googleapis.workflowexecutions.v1.projects.locations.workflows.executions.run
                   args:
-                    workflow_id: "${nextWorkflow}"  
-                    location: "${location}"         
-                    project_id: "${project}"        
-                    argument: ""                    
+                    workflow_id: "${nextWorkflow}"  # Next workflow
+                    location: "${location}"         # Location 
+                    project_id: "${project}"        # Project id
+                    argument: ""                    # None
                   result: runResult
 
     - log_success:
