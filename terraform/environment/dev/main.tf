@@ -74,3 +74,14 @@ module "abinbev_big_query" {
   region         = var.region
   project        = var.project
 }
+
+####################################
+#             ALERT POLICIES       #
+####################################
+
+module "abinbev_alert_policies" {
+  source          = "../../modules/alert_policies"
+  project         = var.project
+  email_to_alert  = var.email_to_alert
+  environment     = var.environment
+}

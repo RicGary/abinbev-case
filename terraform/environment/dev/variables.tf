@@ -15,3 +15,10 @@ variable "schedule_import_raw_data" {
 variable "region" {
   default = "southamerica-east1"
 }
+
+variable "email_to_alert" {
+  type        = string
+  description = "Email to send notifications to."
+}
+
+variable "environment" {}

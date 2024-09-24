@@ -1,2 +1,3 @@
 project               = "PROJECT-NAME"
 service_account_email = "SERVICE-ACCOUNT-NAME"
+email_to_alert        = "YOUR-EMAIL"

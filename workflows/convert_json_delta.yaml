@@ -97,12 +97,13 @@ main:
           - condition: ${job_status.status.state == "SUCCEEDED"}
             steps:
               - start_existing_workflow:
-                  call: googleapis.workflows.v1beta.projects.locations.workflows.executions.create
+                  call: googleapis.workflowexecutions.v1.projects.locations.workflows.executions.run
                   args:
-                    parent: "projects/${project}/locations/${location}/workflows/${nextWorkflow}"
-                    body:
-                      argument: ""  # Aqui você pode passar argumentos se o workflow aceitar
-                  result: next_workflow_result
+                    workflow_id: "${nextWorkflow}"  
+                    location: "${location}"         
+                    project_id: "${project}"        
+                    argument: ""                    
+                  result: runResult
 
     - log_success:
         switch:
@@ -111,4 +112,4 @@ main:
               - print_success:
                   call: sys.log
                   args:
-                    text: "Job completed successfully, triggered next workflow: ${next_workflow_result.name}"
+                    text: "Job completed successfully, triggered next workflow: ${runResult.name}"
