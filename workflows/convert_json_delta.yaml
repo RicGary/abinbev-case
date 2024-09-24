@@ -1,0 +1,114 @@
+main:
+  params: [input]
+  steps:
+    - init:
+        assign: 
+          - project: "abinbev-case-eric"
+          - location: "southamerica-east1"
+          - imageName: "dataproc-convert-to-delta"
+          - nextWorkflow: "export_to_bq"
+
+    - submit_batch_job:
+        call: googleapis.batch.v1.projects.locations.jobs.create
+        args:
+          parent: "projects/${project}/locations/${location}"
+          body:
+            taskGroups:
+              - taskCount: "1"
+                parallelism: "1"
+                taskSpec:
+                  computeResource:
+                    cpuMilli: "1000"
+                    memoryMib: "512"
+                  runnables:
+                    - container:
+                        imageUri: "gcr.io/${project}/${imageName}:latest"
+                        entrypoint: ""
+                        volumes: []
+                  volumes: []
+            allocationPolicy:
+              instances:
+                - policy:
+                    provisioningModel: "STANDARD"
+                    machineType: "e2-medium"
+            logsPolicy:
+              destination: "CLOUD_LOGGING"
+        result: submit_result
+
+    - check_job_status:
+        call: googleapis.batch.v1.projects.locations.jobs.get
+        args:
+          name: ${submit_result.name}
+        result: job_status
+
+    - retry_if_failed:
+        switch:
+          - condition: ${job_status.status.state == "FAILED"}
+            steps:
+              - sleep_10_seconds:
+                  call: sys.sleep
+                  args:
+                    seconds: 10
+
+              - resubmit_batch_job:
+                  call: googleapis.batch.v1.projects.locations.jobs.create
+                  args:
+                    parent: "projects/${project}/locations/${location}"
+                    body:
+                      taskGroups:
+                        - taskCount: "1"
+                          parallelism: "1"
+                          taskSpec:
+                            computeResource:
+                              cpuMilli: "1000"
+                              memoryMib: "512"
+                            runnables:
+                              - container:
+                                  imageUri: "gcr.io/${project}/${imageName}:latest"
+                                  entrypoint: ""
+                                  volumes: []
+                            volumes: []
+                      allocationPolicy:
+                        instances:
+                          - policy:
+                              provisioningModel: "STANDARD"
+                              machineType: "e2-medium"
+                      logsPolicy:
+                        destination: "CLOUD_LOGGING"
+                  result: resubmit_result
+
+              - check_resubmit_status:
+                  call: googleapis.batch.v1.projects.locations.jobs.get
+                  args:
+                    name: ${resubmit_result.name}
+                  result: resubmit_job_status
+
+              - handle_final_failure:
+                  switch:
+                    - condition: ${resubmit_job_status.status.state == "FAILED"}
+                      steps:
+                        - print_error:
+                            call: sys.log
+                            args:
+                              text: "Job failed after retry: ${resubmit_job_status.status.error.message}"
+
+    - trigger_next_workflow:
+        switch:
+          - condition: ${job_status.status.state == "SUCCEEDED"}
+            steps:
+              - start_existing_workflow:
+                  call: googleapis.workflows.v1beta.projects.locations.workflows.executions.create
+                  args:
+                    parent: "projects/${project}/locations/${location}/workflows/${nextWorkflow}"
+                    body:
+                      argument: ""  # Aqui você pode passar argumentos se o workflow aceitar
+                  result: next_workflow_result
+
+    - log_success:
+        switch:
+          - condition: ${job_status.status.state == "SUCCEEDED"}
+            steps:
+              - print_success:
+                  call: sys.log
+                  args:
+                    text: "Job completed successfully, triggered next workflow: ${next_workflow_result.name}"
