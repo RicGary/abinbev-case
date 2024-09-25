@@ -6,26 +6,26 @@ main:
           - project: "abinbev-case-eric"
           - location: "southamerica-east1"
           - imageName: "import-raw-data"
-          - nextWorkflow: "import-raw-data"
+          - nextWorkflow: "convert-json-delta"
 
     - submit_batch_job:
-        call: googleapis.batch.v1.projects.locations.jobs.create
+        call: http.post
         args:
-          parent: "projects/${project}/locations/${location}"
+          url: ${"batch.googleapis.com/v1/projects/" + project + "/locations/" + location + "/jobs"}
+          auth:
+            type: OAuth2
           body:
             taskGroups:
-              - taskCount: "1"
-                parallelism: "1"
-                taskSpec:
-                  computeResource:
-                    cpuMilli: "1000"
-                    memoryMib: "512"
-                  runnables:
-                    - container:
-                        imageUri: "gcr.io/${project}/${imageName}:latest"
-                        entrypoint: ""
-                        volumes: []
-                  volumes: []
+              taskSpec:
+                computeResource:
+                  cpuMilli: 1000
+                  memoryMib: 512
+                runnables:
+                  container:
+                    imageUri: ${"gcr.io/" + project + "/" + imageName + ":latest"}
+                    entrypoint: ""
+                    volumes: []
+                volumes: []
             allocationPolicy:
               instances:
                 - policy:
@@ -35,82 +35,48 @@ main:
               destination: "CLOUD_LOGGING"
         result: submit_result
 
-    - check_job_status:
-        call: googleapis.batch.v1.projects.locations.jobs.get
+    - log_batch_info:
+        call: sys.log
         args:
-          name: ${submit_result.name}
-        result: job_status
+            text: '${"Batch Job UID: " + submit_result.body.uid}'
+            severity: INFO
+            
+    - wait_ten_seconds:
+        call: sys.sleep
+        args:
+            seconds: 10
 
-    - retry_if_failed:
+    - check_batch_status:
+        try:
+            call: http.get
+            args:
+                url: ${"batch.googleapis.com/v1/" + submit_result.body.name}
+                auth:
+                    type: OAuth2
+            result: batch_response
+        retry: ${http.default_retry}
+
+    - check_response:
         switch:
-          - condition: ${job_status.status.state == "FAILED"}
-            steps:
-              - sleep_10_seconds:
-                  call: sys.sleep
-                  args:
-                    seconds: 10
+            - condition: ${batch_response.body.status.state != "SUCCEEDED" and batch_response.body.status.state != "FAILED" and batch_response.body.status.state != "CANCELLED"}
+              next: wait_ten_seconds
+            - condition: ${batch_response.body.status.state == "FAILED"}
+              next: raise_except
+            - condition: ${batch_response.body.status.state == "SUCCEEDED"}
+              next: trigger_next_workflow
 
-              - resubmit_batch_job:
-                  call: googleapis.batch.v1.projects.locations.jobs.create
-                  args:
-                    parent: "projects/${project}/locations/${location}"
-                    body:
-                      taskGroups:
-                        - taskCount: "1"
-                          parallelism: "1"
-                          taskSpec:
-                            computeResource:
-                              cpuMilli: "1000"
-                              memoryMib: "512"
-                            runnables:
-                              - container:
-                                  imageUri: "gcr.io/${project}/${imageName}:latest"
-                                  entrypoint: ""
-                                  volumes: []
-                            volumes: []
-                      allocationPolicy:
-                        instances:
-                          - policy:
-                              provisioningModel: "STANDARD"
-                              machineType: "e2-medium"
-                      logsPolicy:
-                        destination: "CLOUD_LOGGING"
-                  result: resubmit_result
-
-              - check_resubmit_status:
-                  call: googleapis.batch.v1.projects.locations.jobs.get
-                  args:
-                    name: ${resubmit_result.name}
-                  result: resubmit_job_status
-
-              - handle_final_failure:
-                  switch:
-                    - condition: ${resubmit_job_status.status.state == "FAILED"}
-                      steps:
-                        - print_error:
-                            call: sys.log
-                            args:
-                              text: "Job failed after retry: ${resubmit_job_status.status.error.message}"
+    - raise_except:
+        raise: '${"Batch " + submit_result.body.uid + " failed: Check batch logs for more info."}'
 
     - trigger_next_workflow:
-        switch:
-          - condition: ${job_status.status.state == "SUCCEEDED"}
-            steps:
-              - start_existing_workflow:
-                  call: googleapis.workflowexecutions.v1.projects.locations.workflows.executions.run
-                  args:
-                    workflow_id: "${nextWorkflow}"  # Next workflow
-                    location: "${location}"         # Location 
-                    project_id: "${project}"        # Project id
-                    argument: ""                    # None                   
-                  result: runResult
-
-    - log_success:
-        switch:
-          - condition: ${job_status.status.state == "SUCCEEDED"}
-            steps:
-              - print_success:
-                  call: sys.log
-                  args:
-                    text: "Job completed successfully, triggered next workflow: ${runResult.name}"
-
+        steps:
+          - start_existing_workflow:
+              call: googleapis.workflowexecutions.v1.projects.locations.workflows.executions.run
+              args:
+                workflow_id: ${nextWorkflow}
+                location: ${location}        
+                project_id: ${project}     
+                argument: "" 
+                
+    - result_show:
+        return: ${batch_response}
